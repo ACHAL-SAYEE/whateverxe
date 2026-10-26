@@ -11867,8 +11867,14 @@ uint32_t XE::wrapTGLLaneMask(void *port) {
 }
 
 bool XE::wrapTGLAcceleratorStart(IOService *that, IOService *provider) {
+ SYSLOG("igfx","TGL accelerator start callback invoked physical=%08x provider=%p",callbackXE->xeProfile.identity,provider);
  if((callbackXE->display12SmallGTDetected && !callbackXE->display12SmallGTReady) ||
-    (callbackXE->adlsDisplaySelected && !callbackXE->adlsDisplayHooksReady))return false;
+    (callbackXE->adlsDisplaySelected && !callbackXE->adlsDisplayHooksReady)) {
+  SYSLOG("igfx","TGL accelerator start blocked: display prerequisites smallGT=%d ready=%d adls=%d hooks=%d",
+   callbackXE->display12SmallGTDetected,callbackXE->display12SmallGTReady,
+   callbackXE->adlsDisplaySelected,callbackXE->adlsDisplayHooksReady);
+  return false;
+ }
  if (callbackXE->adlnDetected && adlnNativeRCSProfileRequested && !adlnNativeRCSProfileReady) {
   SYSLOG("igfx", "AlderLakeN native RCS profile qualification rejected accelerator start");
   return false;
@@ -11885,7 +11891,10 @@ bool XE::wrapTGLAcceleratorStart(IOService *that, IOService *provider) {
   return false;
  }
  tglRecordStartOrder(5,that);
-	if (!callbackXE->tglAcceleratorReady) return false;
+	if (!callbackXE->tglAcceleratorReady) {
+  SYSLOG("igfx","TGL accelerator start blocked: accelerator hooks are not ready");
+  return false;
+ }
 	if (callbackXE->adlnDetected) {
 		auto pci=OSDynamicCast(IOPCIDevice,provider);
 		if (!callbackXE->adlnNativeReady || !pci || !xelpAlderLakeNDevice(pci)) return false;
@@ -11945,7 +11954,8 @@ bool XE::wrapTGLAcceleratorStart(IOService *that, IOService *provider) {
 		that->setProperty("IOGVAHEVCDecode", "2");
 
 	if (!tglBlitScratchSize || (*tglBlitScratchSize!=0xD240 && *tglBlitScratchSize!=0xE000)) {
-		SYSLOG("igfx", "TGL blit scratch parameter mismatch");
+ 		SYSLOG("igfx", "TGL accelerator start blocked: blit scratch parameter mismatch present=%d value=%x",
+   tglBlitScratchSize!=nullptr,tglBlitScratchSize?*tglBlitScratchSize:0);
 		return false;
 	}
 	*tglBlitScratchSize=0xE000;
@@ -11955,6 +11965,9 @@ bool XE::wrapTGLAcceleratorStart(IOService *that, IOService *provider) {
 	auto bar = pci ? pci->getDeviceMemoryWithRegister(0x10) : nullptr;
 	callbackXE->tglAcceleratorOwner = that;
 	callbackXE->tglAcceleratorBARSize = bar ? bar->getLength() : 0;
+ SYSLOG("igfx","TGL accelerator start prepared physical=%08x pci=%p bar=%p barSize=%llx disablegfxfirmware=%d",
+  callbackXE->xeProfile.identity,pci,bar,static_cast<uint64_t>(callbackXE->tglAcceleratorBARSize),
+  checkKernelArgument("-disablegfxfirmware"));
 	if (checkKernelArgument("-disablegfxfirmware")) {
   tglHost.startingOwner=that;
   // One fixed capture per boot. Never reset slots while an older callback
@@ -11964,7 +11977,9 @@ bool XE::wrapTGLAcceleratorStart(IOService *that, IOService *provider) {
    tglHost.startThread=reinterpret_cast<uintptr_t>(current_thread());tglHost.owner=that;
   }
 	}
+	SYSLOG("igfx","TGL accelerator start pre-parent observation");
 	tglObserveAccelerator(that, 2, false, 0, reinterpret_cast<uintptr_t>(provider));
+	SYSLOG("igfx","TGL accelerator start calling Apple start");
 	SYSLOG("igfx", "TGL accelerator start entered");
 	bool result = FunctionCast(wrapTGLAcceleratorStart, callbackXE->orgTGLAcceleratorStart)(that, provider);
 	if (result) IORegistryEntry::getRegistryRoot()->setProperty("TGLIOSurfaceCCSAtStart",
